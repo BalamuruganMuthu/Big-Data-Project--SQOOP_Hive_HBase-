@@ -1,0 +1,1423 @@
+Extraction of Source code & data:
+
+Bala: Downloaded "creditcard_insurance.tar.gz" from Inceptez's gdrive and using WinSCP, the file is FTP'ed to VM.
+
+The file is kept in "/home/hduser" (LFS)
+
+-rw-r--r--   1 hduser hduser 22917120 Oct 23  2020 creditcard_insurance.tar.gz
+
+Step 1: Untar the file
+
+[hduser@Inceptez ~]$ tar xvf creditcard_insurance.tar.gz 
+
+All extracted scripts, datasets and other files will be in the given below location.
+
+[hduser@Inceptez creditcard_insurance]$ ls -lart
+total 22444
+-rw-r--r--   1 hduser hduser  391355 Jun 18  2015 custs.csv
+-rw-r--r--   1 hduser hduser  876362 May 13  2018 creditcard_defaulters_cst~
+-rw-r--r--   1 hduser hduser  686476 May 13  2018 creditcard_defaulters_pst~
+-rw-r--r--   1 hduser hduser  876362 May 13  2018 2_creditcard_defaulters_cst
+-rw-r--r--   1 hduser hduser  686476 May 13  2018 2_2_creditcard_defaulters_pst
+-rw-r--r--   1 hduser hduser  740280 May 13  2018 custmaster~
+-rw-r--r--   1 hduser hduser     867 May 13  2018 1_dbscript~
+......
+......
+......
+
+To start the daemons in single command
+
+[hduser@Inceptez creditcard_insurance]$ jps
+21139 Jps
+
+Note: No daemons are running
+
+Run the Hadoop (HDFS and YARN) daemons:
+start-all.sh  ---> to start the all daemons (HDFS and YARN) in single command
+start-dfs.sh  ---> to start the HDFS daemons - NameNode, DataNode and SecondaryNameNode
+
+[hduser@Inceptez creditcard_insurance]$ jps
+21587 SecondaryNameNode
+21382 DataNode
+21702 Jps
+21273 NameNode
+
+
+start-yarn.sh  ---> to start the YARN daemons
+
+[hduser@Inceptez creditcard_insurance]$ jps
+21760 ResourceManager  --> YARN daemon
+21587 SecondaryNameNode
+21382 DataNode
+22070 Jps
+21273 NameNode
+21871 NodeManager      --> YARN daemon
+
+Starting the history server:
+[hduser@Inceptez creditcard_insurance]$ mr-jobhistory-daemon.sh start historyserver
+starting historyserver, logging to /usr/local/hadoop/logs/mapred-hduser-historyserver-Inceptez.out
+[hduser@Inceptez creditcard_insurance]$ jps
+21760 ResourceManager
+21587 SecondaryNameNode
+22261 JobHistoryServer   ---> Job History Server
+21382 DataNode
+21273 NameNode
+22299 Jps
+21871 NodeManager
+
+Login, start mysql service and exit:
+
+Step 1: Open a new terminal
+
+Step 2: Issue the below command
+sudo service mysqld start ---> to start the mysql daemon
+sudo service mysqld stop  ---> to stop the mysql daemon
+
+[hduser@Inceptez creditcard_insurance]$ sudo service mysqld start
+[sudo] password for hduser: 
+Starting mysqld:                                           [  OK  ]
+
+[hduser@Inceptez creditcard_insurance]$ mysql -u root -p
+Enter password: 
+Welcome to the MySQL monitor.  Commands end with ; or \g.
+Your MySQL connection id is 33
+Server version: 5.1.73 Source distribution
+
+Copyright (c) 2000, 2013, Oracle and/or its affiliates. All rights reserved.
+
+Oracle is a registered trademark of Oracle Corporation and/or its
+affiliates. Other names may be trademarks of their respective
+owners.
+
+Type 'help;' or '\h' for help. Type '\c' to clear the current input statement.
+
+mysql> 
+
+Data preparation in the source systems
+--------------------------------------
+DB to Hadoop Data Ingestion:
+----------------------------
+Insert into the mysql database - custmaster data in a table and the credit data into 2 tables of 2
+timezones:
+
+Step 1: Create a database, custdb
+
+mysql> create database if not exists custdb;
+Query OK, 1 row affected, 1 warning (0.00 sec)
+
+create the required tables in custdb
+------------------------------------
+
+mysql> use custdb;
+Database changed
+
+mysql> show tables;
++-----------------------+
+| Tables_in_custdb      |
++-----------------------+
+| customer              |
+| customer_bkp          |
+| customer_bkp1         |
+| customer_hdfs         |
+| customer_lastmodified |
+| customer_new          |
++-----------------------+
+6 rows in set (0.00 sec)
+
+Drop the tables credits_pst, credits_cst and custmaster
+-------------------------------------------------------
+
+mysql> drop table if exists credits_pst;
+Query OK, 0 rows affected, 1 warning (0.02 sec)
+
+mysql> drop table if exists credits_cst;
+Query OK, 0 rows affected, 1 warning (0.00 sec)
+
+mysql> drop table if exists custmaster;
+Query OK, 0 rows affected, 1 warning (0.00 sec)
+
+Create the tables credits_pst, credits_cst and custmaster
+---------------------------------------------------------
+
+mysql> create table if not exists credits_pst (id integer,lmt integer,sex integer,edu integer,marital integer,age
+    -> integer,pay integer,billamt integer,defaulter integer,issuerid1 integer,issuerid2 integer,tz varchar(3));
+Query OK, 0 rows affected (0.08 sec)
+
+mysql> create table if not exists credits_cst (id integer,lmt integer,sex integer,edu integer,marital integer,age
+    -> integer,pay integer,billamt integer,defaulter integer,issuerid1 integer,issuerid2 integer,tz varchar(3));
+Query OK, 0 rows affected (0.01 sec)
+
+mysql> create table if not exists custmaster (id integer,fname varchar(100),lname varchar(100),ageval
+    -> integer,profession varchar(100));
+Query OK, 0 rows affected (0.01 sec)
+
+Load the data on to the tables:
+-------------------------------
+The below files contain insert statements 
+/home/hduser/creditcard_insurance/2_2_creditcard_defaulters_pst
+/home/hduser/creditcard_insurance/2_creditcard_defaulters_cst
+/home/hduser/creditcard_insurance/custmaster
+
+[hduser@Inceptez creditcard_insurance]$ head -1 /home/hduser/creditcard_insurance/2_2_creditcard_defaulters_pst
+insert into credits_pst (id,lmt,sex,edu,marital,age,pay,billamt,defaulter,issuerid1,issuerid2,tz) values(5612,50000,1,2,2,37,0,50148,0,30115,30115,'PST');
+[hduser@Inceptez creditcard_insurance]$ head -1 /home/hduser/creditcard_insurance/2_creditcard_defaulters_cst
+insert into credits_cst (id,lmt,sex,edu,marital,age,pay,billamt,defaulter,issuerid1,issuerid2,tz) values(1,20000,2,2,1,24,2,3913,1,21989,21989,'CST');
+[hduser@Inceptez creditcard_insurance]$ head -1 /home/hduser/creditcard_insurance/custmaster
+insert into custmaster values(1,'Kristina','Chung',55,'Pilot');
+
+In mysql, execute the below commands to load the data in to the tables
+
+mysql > source /home/hduser/creditcard_insurance/2_2_creditcard_defaulters_pst
+mysql > source /home/hduser/creditcard_insurance/2_creditcard_defaulters_cst
+mysql > source /home/hduser/creditcard_insurance/custmaster
+
+mysql> show tables;
++-----------------------+
+| Tables_in_custdb      |
++-----------------------+
+| credits_cst           |
+| credits_pst           |
+| custmaster            |
+| customer              |
+| customer_bkp          |
+| customer_bkp1         |
+| customer_hdfs         |
+| customer_lastmodified |
+| customer_new          |
++-----------------------+
+9 rows in set (0.00 sec)
+
+mysql> select * from credits_pst limit 1;
++------+-------+------+------+---------+------+------+---------+-----------+-----------+-----------+------+
+| id   | lmt   | sex  | edu  | marital | age  | pay  | billamt | defaulter | issuerid1 | issuerid2 | tz   |
++------+-------+------+------+---------+------+------+---------+-----------+-----------+-----------+------+
+| 5612 | 50000 |    1 |    2 |       2 |   37 |    0 |   50148 |         0 |     30115 |     30115 | PST  |
++------+-------+------+------+---------+------+------+---------+-----------+-----------+-----------+------+
+1 row in set (0.02 sec)
+
+mysql> select * from credits_cst limit 1;
++------+-------+------+------+---------+------+------+---------+-----------+-----------+-----------+------+
+| id   | lmt   | sex  | edu  | marital | age  | pay  | billamt | defaulter | issuerid1 | issuerid2 | tz   |
++------+-------+------+------+---------+------+------+---------+-----------+-----------+-----------+------+
+|    1 | 20000 |    2 |    2 |       1 |   24 |    2 |    3913 |         1 |     21989 |     21989 | CST  |
++------+-------+------+------+---------+------+------+---------+-----------+-----------+-----------+------+
+1 row in set (0.00 sec)
+
+mysql> select * from custmaster limit 1;
++------+----------+-------+--------+------------+
+| id   | fname    | lname | ageval | profession |
++------+----------+-------+--------+------------+
+|    1 | Kristina | Chung |     55 | Pilot      |
++------+----------+-------+--------+------------+
+1 row in set (0.00 sec)
+
+mysql> select count(*) from credits_pst;
++----------+
+| count(*) |
++----------+
+|     4389 |
++----------+
+1 row in set (0.00 sec)
+
+mysql> select count(*) from credits_cst;
++----------+
+| count(*) |
++----------+
+|     5611 |
++----------+
+1 row in set (0.00 sec)
+
+mysql> select count(*) from custmaster;
++----------+
+| count(*) |
++----------+
+|    10000 |
++----------+
+1 row in set (0.00 sec)
+
+Sqoop integration with Hive + ETL & ELT operations 
+---------------------------------------------------
+Start hive service
+
+[hduser@Inceptez ~]$ hive --service metastore
+Starting Hive Metastore Server
+20/10/14 15:32:50 WARN conf.HiveConf: HiveConf of name hive.mapjoin.optimized.keys does not exist
+20/10/14 15:32:50 WARN conf.HiveConf: HiveConf of name hive.optimize.multigroupby.common.distincts does not exist
+20/10/14 15:32:50 WARN conf.HiveConf: HiveConf of name hive.mapjoin.lazy.hashtable does not exist
+20/10/14 15:32:50 WARN conf.HiveConf: HiveConf of name hive.server2.thrift.http.min.worker.threads does not exist
+20/10/14 15:32:50 WARN conf.HiveConf: HiveConf of name hive.server2.thrift.http.max.worker.threads does not exist
+20/10/14 15:32:50 WARN conf.HiveConf: HiveConf of name hive.server2.logging.operation.verbose does not exist
+SLF4J: Class path contains multiple SLF4J bindings.
+SLF4J: Found binding in [jar:file:/usr/local/hadoop/share/hadoop/common/lib/slf4j-log4j12-1.7.10.jar!/org/slf4j/impl/StaticLoggerBinder.class]
+SLF4J: Found binding in [jar:file:/usr/local/hbase/lib/slf4j-log4j12-1.6.4.jar!/org/slf4j/impl/StaticLoggerBinder.class]
+SLF4J: See http://www.slf4j.org/codes.html#multiple_bindings for an explanation.
+SLF4J: Actual binding is of type [org.slf4j.impl.Log4jLoggerFactory]
+
+Open a separate terminal, for hive
+
+******** Welcome Balamurugan ******** 
+[hduser@Inceptez ~]$ hive 
+20/10/14 15:34:59 WARN conf.HiveConf: HiveConf of name hive.mapjoin.optimized.keys does not exist
+20/10/14 15:34:59 WARN conf.HiveConf: HiveConf of name hive.optimize.multigroupby.common.distincts does not exist
+20/10/14 15:34:59 WARN conf.HiveConf: HiveConf of name hive.mapjoin.lazy.hashtable does not exist
+20/10/14 15:34:59 WARN conf.HiveConf: HiveConf of name hive.server2.thrift.http.min.worker.threads does not exist
+20/10/14 15:34:59 WARN conf.HiveConf: HiveConf of name hive.server2.thrift.http.max.worker.threads does not exist
+20/10/14 15:34:59 WARN conf.HiveConf: HiveConf of name hive.server2.logging.operation.verbose does not exist
+
+Logging initialized using configuration in jar:file:/usr/local/hive/lib/hive-common-1.2.2.jar!/hive-log4j.properties
+SLF4J: Class path contains multiple SLF4J bindings.
+SLF4J: Found binding in [jar:file:/usr/local/hadoop/share/hadoop/common/lib/slf4j-log4j12-1.7.10.jar!/org/slf4j/impl/StaticLoggerBinder.class]
+SLF4J: Found binding in [jar:file:/usr/local/hbase/lib/slf4j-log4j12-1.6.4.jar!/org/slf4j/impl/StaticLoggerBinder.class]
+SLF4J: See http://www.slf4j.org/codes.html#multiple_bindings for an explanation.
+SLF4J: Actual binding is of type [org.slf4j.impl.Log4jLoggerFactory]
+hive> show databases;
+OK
+custdb
+default
+retail
+retail_tmp
+Time taken: 3.654 seconds, Fetched: 4 row(s)
+hive> 
+
+
+Create a database in hive as insure
+-----------------------------------
+
+hive> create database if not exists insure;
+OK
+Time taken: 0.599 seconds
+hive> show databases;
+OK
+custdb
+default
+insure
+retail
+retail_tmp
+Time taken: 0.083 seconds, Fetched: 5 row(s)
+hive> 
+
+
+Sqoop import the data into hive table insure.credits_pst and insure.credits_cst with options
+such as hive overwrite, number of mappers 2, where hive table created by sqoop with id as
+bigint, billamt as float
+---------------------------------------------------------------------------------------------
+
+--hive-import 			Import tables into Hive (Uses Hive’s default delimiters if none are set.)
+--hive-overwrite 		Overwrite existing data in the Hive table. 
+--hive-table <table-name> 	Sets the table name to use when importing to Hive.
+--map-column-hive <map> 	Override default mapping from SQL type to Hive type for configured columns. 
+
+<map> - example <column_name>=BIGINT
+
+
+Sqoop import the data into hive table insure.credits_pst
+--------------------------------------------------------
+
+[hduser@Inceptez creditcard_insurance]$ sqoop-import \
+> --connect jdbc:mysql://localhost/custdb \
+> --username hiveuser \
+> --password hivepassword \
+> -table credits_pst \
+> -m 2 \
+> --split-by id \
+> --hive-import \
+> --hive-table insure.credits_pst \
+> --hive-overwrite \
+> --map-column-hive id=BIGINT,billamt=FLOAT;
+
+20/10/23 20:18:22 INFO hive.HiveImport: Hive import complete.
+20/10/23 20:18:22 INFO hive.HiveImport: Export directory is contains the _SUCCESS file only, removing the directory.
+[hduser@Inceptez creditcard_insurance]$ 
+
+Sqoop import the data into hive table insure.credits_cst
+--------------------------------------------------------
+
+[hduser@Inceptez creditcard_insurance]$ sqoop-import \
+> --connect jdbc:mysql://localhost/custdb \
+> --username hiveuser \
+> --password hivepassword \
+> -table credits_cst \
+> -m 2 \
+> --split-by id \
+> --hive-import \
+> --hive-table insure.credits_cst \
+> --hive-overwrite \
+> --map-column-hive id=BIGINT,billamt=FLOAT;
+
+20/10/23 20:21:33 INFO hive.HiveImport: Time taken: 0.902 seconds
+20/10/23 20:21:34 INFO hive.HiveImport: Hive import complete.
+20/10/23 20:21:34 INFO hive.HiveImport: Export directory is contains the _SUCCESS file only, removing the directory.
+
+hive> use insure;
+OK
+Time taken: 0.17 seconds
+hive> set hive.cli.print.
+hive.cli.print.current.db   hive.cli.print.header       
+hive> set hive.cli.print.current.db=true;
+hive (insure)> set hive.cli.print.header=true;
+hive (insure)> show tables;
+OK
+tab_name
+credits_cst
+credits_pst
+Time taken: 0.261 seconds, Fetched: 2 row(s)
+
+hive (insure)> describe credits_pst;
+OK
+col_name	data_type	comment
+id                  	bigint              	                    
+lmt                 	int                 	                    
+sex                 	int                 	                    
+edu                 	int                 	                    
+marital             	int                 	                    
+age                 	int                 	                    
+pay                 	int                 	                    
+billamt             	float               	                    
+defaulter           	int                 	                    
+issuerid1           	int                 	                    
+issuerid2           	int                 	                    
+tz                  	string              	                    
+Time taken: 0.391 seconds, Fetched: 12 row(s)
+
+hive (insure)> describe credits_cst;
+OK
+col_name	data_type	comment
+id                  	bigint              	                    
+lmt                 	int                 	                    
+sex                 	int                 	                    
+edu                 	int                 	                    
+marital             	int                 	                    
+age                 	int                 	                    
+pay                 	int                 	                    
+billamt             	float               	                    
+defaulter           	int                 	                    
+issuerid1           	int                 	                    
+issuerid2           	int                 	                    
+tz                  	string              	                    
+Time taken: 0.091 seconds, Fetched: 12 row(s)
+
+
+ETL & ELT using Hive
+--------------------
+
+Filter the cst and pst tables with the billamt > 0 and union all both dataset and load into a
+single table called insure.cstpstreorder using create table as select (CTAS)
+
+hive (insure)> create table if not exists cstpstreorder
+             > as
+             > select * from credits_cst where billamt > 0
+             > union all
+             > select * from credits_pst where billamt > 0;
+
+hive (insure)> show tables;
+OK
+tab_name
+credits_cst
+credits_pst
+cstpstreorder
+Time taken: 0.356 seconds, Fetched: 3 row(s)
+
+hive (insure)> select count(*) from cstpstreorder;
+OK
+_c0
+9087
+
+
+Validate against the mysql table:
+---------------------------------
+
+[hduser@Inceptez creditcard_insurance]$ sqoop eval --connect jdbc:mysql://localhost/custdb  --username root --password root -e "select count(*) from credits_pst where billamt > 0";
+
+------------------------
+| count(*)             | 
+------------------------
+| 3994                 | 
+------------------------
+
+[hduser@Inceptez creditcard_insurance]$ sqoop eval --connect jdbc:mysql://localhost/custdb  --username root --password root -e "select count(*) from credits_cst where billamt > 0";
+
+------------------------
+| count(*)             | 
+------------------------
+| 5093                 | 
+------------------------
+
+
+Note: We can merge the step 2 and 3 and make the above 2 sqoop statements as 1 sqoop
+statement to directly import data into the insure.cstpstreorder by writing –query with billamt>0
+filter and union of both credits_pst and credits_cst at the MYSQL level itself finally convert the
+insure.cstpstreorder into external table.
+
+--------------------------------------------------------------------------------------------------
+
+[hduser@Inceptez creditcard_insurance]$ 
+
+sqoop-import --connect jdbc:mysql://localhost/custdb  --username hiveuser --password hivepassword --query 'select * from credits_pst where billamt > 0 and $CONDITIONS union all select * from credits_cst where billamt > 0 and $CONDITIONS' --delete-target-dir --target-dir cstpstreorder --split-by id -m 2 --hive-import --hive-table insure.cstpstreorder_1 --hive-overwrite --map-column-hive id=BIGINT,billamt=FLOAT;
+
+hive (insure)> show tables;
+OK
+tab_name
+credits_cst
+credits_pst
+cstpstreorder
+cstpstreorder_1
+Time taken: 0.056 seconds, Fetched: 4 row(s)
+
+hive (insure)> select count(*) from cstpstreorder_1;
+
+OK
+_c0
+9087
+Time taken: 37.501 seconds, Fetched: 1 row(s)
+
+hive (insure)> alter table cstpstreorder_1 set tblproperties('EXTERNAL'='TRUE');
+OK
+Time taken: 0.226 seconds
+
+hive (insure)> show create table cstpstreorder;
+OK
+createtab_stmt
+CREATE TABLE `cstpstreorder`(
+  `id` bigint, 
+  `lmt` int, 
+  `sex` int, 
+  `edu` int, 
+  `marital` int, 
+  `age` int, 
+  `pay` int, 
+  `billamt` float, 
+  `defaulter` int, 
+  `issuerid1` int, 
+  `issuerid2` int, 
+  `tz` string)
+ROW FORMAT SERDE 
+  'org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe' 
+STORED AS INPUTFORMAT 
+  'org.apache.hadoop.mapred.TextInputFormat' 
+OUTPUTFORMAT 
+  'org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat'
+LOCATION
+  'hdfs://localhost:54310/user/hive/warehouse/insure.db/cstpstreorder'
+TBLPROPERTIES (
+  'COLUMN_STATS_ACCURATE'='true', 
+  'numFiles'='1', 
+  'numRows'='-1', 
+  'rawDataSize'='-1', 
+  'totalSize'='441263', 
+  'transient_lastDdlTime'='1603465994')
+Time taken: 0.209 seconds, Fetched: 28 row(s)
+hive (insure)> 
+
+hive (insure)> CREATE EXTERNAL TABLE `cstpstpenality`(
+             >   `id` bigint,
+             >   `issuerid1` int,
+             >   `issuerid2` int, 
+             >   `lmt` int, 
+             >   `newlmt` int,
+             >   `sex` int, 
+             >   `edu` int, 
+             >   `marital` int, 
+             >   `pay` int, 
+             >   `billamt` float, 
+             >   `newbillamt` float, 
+             >   `defaulter` int) 
+             > STORED AS ORC
+             > LOCATION '/user/hduser/cstpstpenality';
+OK
+Time taken: 0.17 seconds
+hive (insure)> 
+
+hive (insure)> desc formatted cstpstpenality;
+OK
+col_name	data_type	comment
+# col_name            	data_type           	comment             
+	 	 
+id                  	bigint              	                    
+issuerid1           	int                 	                    
+issuerid2           	int                 	                    
+lmt                 	int                 	                    
+newlmt              	int                 	                    
+sex                 	int                 	                    
+edu                 	int                 	                    
+marital             	int                 	                    
+pay                 	int                 	                    
+billamt             	float               	                    
+newbillamt          	float               	                    
+defaulter           	int                 	                    
+	 	 
+# Detailed Table Information	 	 
+Database:           	insure              	 
+Owner:              	hduser              	 
+CreateTime:         	Fri Oct 23 21:19:04 IST 2020	 
+LastAccessTime:     	UNKNOWN             	 
+Protect Mode:       	None                	 
+Retention:          	0                   	 
+Location:           	hdfs://localhost:54310/user/hduser/cstpstpenality	 
+Table Type:         	EXTERNAL_TABLE      	 
+Table Parameters:	 	 
+	EXTERNAL            	TRUE                
+	transient_lastDdlTime	1603468144          
+	 	 
+# Storage Information	 	 
+SerDe Library:      	org.apache.hadoop.hive.ql.io.orc.OrcSerde	 
+InputFormat:        	org.apache.hadoop.hive.ql.io.orc.OrcInputFormat	 
+OutputFormat:       	org.apache.hadoop.hive.ql.io.orc.OrcOutputFormat	 
+Compressed:         	No                  	 
+Num Buckets:        	-1                  	 
+Bucket Columns:     	[]                  	 
+Sort Columns:       	[]                  	 
+Storage Desc Params:	 	 
+	serialization.format	1                   
+Time taken: 4.933 seconds, Fetched: 38 row(s)
+
+
+id,issuerid1,issuerid2,lmt,case defaulter when 1 then lmt-(lmt*0.04) else lmt end as
+newlmt ,sex,edu,marital,pay,billamt,case defaulter when 1 then billamt+(billamt*0.02) else
+billamt end as newbillamt, defaulter;
+--------------------------------------------------------------------------------------
+hive (insure)> insert overwrite table cstpstpenality
+             > select id,
+             >        issuerid1,
+             >        issuerid2,
+             >        lmt,
+             >        case defaulter
+             >             when 1 then lmt-(lmt*0.04) 
+             >             else lmt
+             >        end as newlmt,
+             >        sex,
+             >        edu,
+             >        marital,
+             >        pay,
+             >        billamt,
+             >        case defaulter
+             >             when 1 then billamt+(billamt*0.02) 
+             >             else billamt
+             >        end as newbillamt,
+             >        defaulter
+             >   from cstpstreorder;
+
+[hduser@Inceptez creditcard_insurance]$ hdfs dfs -ls cstpstpenality
+20/10/23 21:39:58 WARN util.NativeCodeLoader: Unable to load native-hadoop library for your platform... using builtin-java classes where applicable
+Found 1 items
+-rw-r--r--   1 hduser hadoop     115849 2020-10-23 21:38 cstpstpenality/000000_0
+
+
+hive (insure)> select * from cstpstpenality limit 5;
+OK
+cstpstpenality.id	cstpstpenality.issuerid1	cstpstpenality.issuerid2	cstpstpenality.lmt	cstpstpenality.newlmt	cstpstpenality.sex	cstpstpenality.edu	cstpstpenality.marital	cstpstpenality.pay	cstpstpenality.billamt	cstpstpenality.newbillamt	cstpstpenality.defaulter
+1	21989	21989	20000	19200	2	2	1	2	3913.0	3991.26	1
+2	38344	38344	120000	115200	2	2	2	-1	2682.0	2735.64	1
+3	38536	38536	90000	90000	2	2	2	0	29239.0	29239.0	0
+4	42507	42507	50000	50000	2	2	1	0	46990.0	46990.0	0
+5	73836	73836	50000	50000	1	2	1	-1	8617.0	8617.0	0
+Time taken: 0.148 seconds, Fetched: 5 row(s)
+
+
+Data Provisioning using Hive, Sqoop and DistCp
+----------------------------------------------
+
+Export and overwrite the above data into /user/hduser/defaultersout/ we will be using
+this defaultersout data in a later point of time and /user/hduser/nondefaultersout/
+locations with defaulter=1 and defaulter=0 respectively using ‘,’ delimiter. We will be
+sending this nondefaultersout data to external systems using Distcp/SFTP
+
+
+hive (insure)> insert overwrite directory '/user/hduser/defaultersout/'
+             > row format delimited 
+             > fields terminated by ','
+             > select * from cstpstpenality where defaulter=1; 
+
+
+[hduser@Inceptez creditcard_insurance]$ hdfs dfs -ls /user/hduser/defaultersout
+20/10/24 05:19:01 WARN util.NativeCodeLoader: Unable to load native-hadoop library for your platform... using builtin-java classes where applicable
+Found 1 items
+-rw-r--r--   1 hduser hadoop     113870 2020-10-24 05:17 /user/hduser/defaultersout/000000_0
+
+
+hive (insure)> insert overwrite directory '/user/hduser/nondefaultersout/'
+             > row format delimited 
+             > fields terminated by ','
+             > select * from cstpstpenality where defaulter=0;
+
+
+[hduser@Inceptez creditcard_insurance]$ hdfs dfs -ls /user/hduser/nondefaultersout
+20/10/24 05:20:01 WARN util.NativeCodeLoader: Unable to load native-hadoop library for your platform... using builtin-java classes where applicable
+Found 1 items
+-rw-r--r--   1 hduser hadoop     395923 2020-10-24 05:19 /user/hduser/nondefaultersout/000000_0
+
+
+Data Provisioning to the Consumers using DistCP
+-----------------------------------------------
+DistCp (distributed copy) is a tool used for large inter/intra-cluster copying. It uses MapReduce to effect its distribution, error handling and recovery and reporting.
+
+Usage:
+$ hadoop distcp <src> <dst>
+
+Example:
+$ hadoop distcp hdfs://nn1:8020/file1 hdfs://nn2:8020/file2
+
+file1 from nn1 is copied to nn2 wih filename file2
+
+Distcp is the best tool as of now. Sqoop is used to copy data from relational database to HDFS and vice versa, but not between HDFS to HDFS.
+
+Inter Cluster
+-------------
+[hduser@Inceptez creditcard_insurance]$ hadoop distcp -overwrite /user/hduser/nondefaultersout /tmp/promocustomers
+
+[hduser@Inceptez creditcard_insurance]$ hadoop distcp -overwrite /user/hduser/nondefaultersout/000000_0 /tmp/promocustomers/nondefaulters
+
+[hduser@Inceptez creditcard_insurance]$ hdfs dfs -ls /tmp/promocustomers
+20/10/24 05:22:56 WARN util.NativeCodeLoader: Unable to load native-hadoop library for your platform... using builtin-java classes where applicable
+Found 2 items
+-rw-r--r--   1 hduser supergroup     395923 2020-10-24 05:21 /tmp/promocustomers/000000_0
+-rw-r--r--   1 hduser supergroup     395923 2020-10-24 05:22 /tmp/promocustomers/nondefaulters
+
+
+Using Distcp with Amazon S3
+
+Distcp can also used to copy data from Amazon S3 to HDFS and vice versa.
+
+
+Data preparation in the source systems
+--------------------------------------
+File system data source ingestion from Cloud using Linux Shell Script
+---------------------------------------------------------------------
+
+Source data
+-----------
+https://s3.amazonaws.com/in.inceptez.bucket1/insurance_project/insuranceinfo.csv
+
+
+Unix Script - validation  - sfm_insuredata.sh
+---------------------------------------------
+
+Line 1:
+
+[hduser@Inceptez creditcard_insurance]$ dt=`date '+%Y%m%d%H'`
+[hduser@Inceptez creditcard_insurance]$ echo $dt
+2020102400
+
+Ex:
+
+dt=`date +"%Y"`
+
+Output: 2020
+
+Check for Numbe of Arguments
+----------------------------
+
+if [ $# -ne 1 ]
+then
+echo "missing"
+else
+echo "good"
+fi
+
+Check whether a directory exists or not
+---------------------------------------
+
+Syntax:
+-------
+
+if [ -d "$DIRECTORY" ]
+
+Ex:
+---
+
+if [ -d /tmp/clouddata ]
+then
+echo "src dir is present"
+else
+mkdir /tmp/clouddata
+fi
+
+if [ -d /tmp/clouddata/archive ]
+then
+echo "archival path exists"
+else
+mkdir /tmp/clouddata/archive
+fi
+
+Write into the log file
+-----------------------
+echo "importing data from cloud" >> /tmp/sfm_${dt}.log
+
+Download the file from AWS S3 (argument#1) to the below LFS location
+wget $1 -O /tmp/clouddata/creditcard_insurance
+
+Example wget command:
+---------------------
+
+[hduser@Inceptez creditcard_insurance]$ wget https://s3.amazonaws.com/in.inceptez.bucket1/insurance_project/insuranceinfo.csv -O /tmp/clouddata/creditcard_insurance
+
+
+When wget execution is 0, then move the message to log file:
+------------------------------------------------------------
+if [ $? -eq 0 ]
+then
+echo "import of data from cloud is completed" >> /tmp/sfm_${dt}.log
+else
+echo "no data imported from cloud"
+exit 0
+fi
+
+Check a file is present or not
+------------------------------
+
+if [ -f /tmp/clouddata/creditcard_insurance ]
+
+Syntax:
+
+if [ -f <file_name> ]
+
+
+
+If the above file is present:
+-----------------------------
+
+Step 1: write a log in the log file
+
+echo "file is present, proceeding further" >> /tmp/sfm_insurance${dt}.log
+
+Step 2: move the file creditcard_insurance to creditcard_insurance_2020102400
+
+mv /tmp/clouddata/creditcard_insurance /tmp/clouddata/creditcard_insurance_${dt}
+
+
+Step 3: obtain the trailer count from the file
+
+trlcnt=`tail -1 /tmp/clouddata/creditcard_insurance_${dt} | awk -F'|' '{ print $2 }'`
+
+Step 4: obtain number of lines
+
+filecnt=`cat /tmp/clouddata/creditcard_insurance_${dt} | wc -l`
+
+Step 5: print both number of lines and trailer count
+
+ echo "trailer count is $trlcnt"
+ echo "file count is $filecnt"
+
+Step 6: if trailer count doesn't match with number of records
+
+write a message "moving to reject, file is invalid" to the log file
+
+move the incorrect file to "reject" folder
+
+ if [ $trlcnt -ne $filecnt ]
+ then
+ echo "moving to reject, file is invalid" >> /tmp/sfm_${dt}.log
+ mkdir -p /tmp/clouddata/reject
+ mv /tmp/clouddata/creditcard_insurance_${dt} /tmp/clouddata/reject/
+ exit 0
+ fi
+
+Step 7: if both matches, remove the trailer record (only) from the file
+
+ sed -i '$d' /tmp/clouddata/creditcard_insurance_${dt}
+
+Step 8: create a folder/directory in HDFS
+
+hadoop fs -mkdir -p /user/hduser/insurance_clouddata/
+
+Step 9: Check whether the above command (step 8) created a folder in HDFS
+
+hadoop fs -test -d /user/hduser/insurance_clouddata
+
+Step 10: print messages in to the log file accordingly
+
+ if [ $? -eq 0 ]
+ then
+ echo "hadoop directory is created " >> /tmp/sfm_${dt}.log
+ else
+ echo " failed to create the hadoop directory /user/hduser/clouddata " >> /tmp/sfm_${dt}.log
+ exit 0
+ fi
+
+Step 11: 
+
+Copy the updated file (creditcard_insurance_2020102400) frol LFS to HDFS location:
+----------------------------------------------------------------------------------
+
+hadoop fs -D dfs.block.size=67108864 -copyFromLocal -f /tmp/clouddata/creditcard_insurance_${dt} /user/hduser/insurance_clouddata/
+
+Step 12:
+
+Check if the above the command executed successfully or not
+
+if the above command is 
+ if [ $? -eq 0 ]
+ then
+ hadoop fs -touchz /user/hduser/insurance_clouddata/_SUCCESS
+ echo "Data copied to HDFS successfully"
+ echo "Data copied to HDFS successfully" >>  /tmp/sfm_${dt}.log
+ else
+ echo "Failed to copy data to HDFS `date` " >> /tmp/sfm_${dt}.log
+ fi
+
+Step 13:
+
+Archieve the file
+
+ echo "moving to linux archive after compressing" >> /tmp/sfm_${dt}.log
+ gzip /tmp/clouddata/creditcard_insurance_${dt}
+ mv /tmp/clouddata/creditcard_insurance_${dt}.gz /tmp/clouddata/archive/
+
+
+Execute the bash script:
+------------------------
+[hduser@Inceptez creditcard_insurance]$ bash sfm_insuredata.sh https://s3.amazonaws.com/in.inceptez.bucket1/insurance_project/insuranceinfo.csv
+--2020-10-24 01:16:25--  https://s3.amazonaws.com/in.inceptez.bucket1/insurance_project/insuranceinfo.csv
+Resolving s3.amazonaws.com... 52.216.238.85
+Connecting to s3.amazonaws.com|52.216.238.85|:443... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 414551 (405K) [text/csv]
+Saving to: “/tmp/clouddata/creditcard_insurance”
+
+100%[===============================================================================>] 414,551     4.80K/s   in 97s     
+
+2020-10-24 01:18:03 (4.19 KB/s) - “/tmp/clouddata/creditcard_insurance” saved [414551/414551]
+
+trailer count is 3823
+file count is 3823
+Remove the trailer line in the file
+20/10/24 01:18:04 WARN util.NativeCodeLoader: Unable to load native-hadoop library for your platform... using builtin-java classes where applicable
+20/10/24 01:18:05 WARN util.NativeCodeLoader: Unable to load native-hadoop library for your platform... using builtin-java classes where applicable
+20/10/24 01:18:07 WARN util.NativeCodeLoader: Unable to load native-hadoop library for your platform... using builtin-java classes where applicable
+20/10/24 01:18:08 WARN util.NativeCodeLoader: Unable to load native-hadoop library for your platform... using builtin-java classes where applicable
+Data copied to HDFS successfully
+[hduser@Inceptez creditcard_insurance]$ 
+
+
+Archived file
+-------------
+[hduser@Inceptez creditcard_insurance]$ ls -lart /tmp/clouddata/archive/
+total 72
+-rw-rw-r-- 1 hduser hduser 62163 Oct 24 01:18 creditcard_insurance_2020102401.gz
+drwxrwxr-x 3 hduser hduser  4096 Oct 24 01:18 ..
+drwxrwxr-x 2 hduser hduser  4096 Oct 24 01:18 .
+
+Log file content:
+-----------------
+[hduser@Inceptez creditcard_insurance]$ cat /tmp/sfm_2020102401.log 
+importing data from cloud
+import of data from cloud is completed
+hadoop directory is created 
+Data copied to HDFS successfully
+moving to linux archive after compressing
+
+File in HDFS
+------------
+Ensure data is imported from cloud to hdfs and get the date and take a note of the timestamp in the
+file
+
+[hduser@Inceptez creditcard_insurance]$ hdfs dfs -ls /user/hduser/insurance_clouddata
+20/10/24 01:22:01 WARN util.NativeCodeLoader: Unable to load native-hadoop library for your platform... using builtin-java classes where applicable
+Found 2 items
+-rw-r--r--   1 hduser hadoop          0 2020-10-24 01:18 /user/hduser/insurance_clouddata/_SUCCESS
+-rw-r--r--   1 hduser hadoop     414543 2020-10-24 01:18 /user/hduser/insurance_clouddata/creditcard_insurance_2020102401
+
+
+File content
+-------------
+[hduser@Inceptez creditcard_insurance]$ hdfs dfs -cat /user/hduser/insurance_clouddata/creditcard_insurance_2020102401 | head -n 2
+20/10/24 01:28:11 WARN util.NativeCodeLoader: Unable to load native-hadoop library for your platform... using builtin-java classes where applicable
+IssuerId,IssuerId2,BusinessYear,StateCode,SourceName,NetworkName,NetworkURL,RowNumber,MarketCoverage,DentalOnlyPlan
+21989,21989,2018,AK,HIOS,ODS Premier,https://www.modahealth.com/ProviderSearch/faces/webpages/home.xhtml?dn=ods,13,,
+
+Number of lines:
+----------------
+[hduser@Inceptez creditcard_insurance]$ hdfs dfs -cat /user/hduser/insurance_clouddata/creditcard_insurance_2020102401 | wc -l
+20/10/24 01:28:52 WARN util.NativeCodeLoader: Unable to load native-hadoop library for your platform... using builtin-java classes where applicable
+3823
+
+
+
+ETL & ELT using Hive
+--------------------
+
+Create a hive table with header line count as 1 and load the insurance dataset
+
+
+hive (insure)> create table insurance
+             > (
+             > issuerid1 int,
+             > issuerid2 int,
+             > businessyear int,
+             > statecode string,
+             > sourcename string,
+             > networkname string,
+             > networkurl string,
+             > rownumber int,
+             > marketcoverage string,
+             > dentalonlyplan string
+             > )
+             > row format delimited
+             > fields terminated by ','
+             > tblproperties("skip.header.line.count"="1");
+OK
+Time taken: 0.919 seconds
+
+
+Load the data "creditcard_insurance_2020102401" from HDFS folder "/user/hduser/insurance_clouddata"
+
+
+hive (insure)> load data inpath '/user/hduser/insurance_clouddata/creditcard_insurance_2020102401' overwrite into table insurance;
+Loading data to table insure.insurance
+Table insure.insurance stats: [numFiles=1, numRows=0, totalSize=414543, rawDataSize=0]
+OK
+Time taken: 0.563 seconds
+
+20/10/24 01:42:35 WARN util.NativeCodeLoader: Unable to load native-hadoop library for your platform... using builtin-java classes where applicable
+Found 1 items
+-rw-r--r--   1 hduser hadoop     414543 2020-10-24 01:18 /user/hive/warehouse/insure.db/insurance/creditcard_insurance_2020102401
+
+
+[hduser@Inceptez creditcard_insurance]$ hdfs dfs -cat /user/hive/warehouse/insure.db/insurance/creditcard_insurance_2020102401 | head -n 2
+20/10/24 01:43:27 WARN util.NativeCodeLoader: Unable to load native-hadoop library for your platform... using builtin-java classes where applicable
+IssuerId,IssuerId2,BusinessYear,StateCode,SourceName,NetworkName,NetworkURL,RowNumber,MarketCoverage,DentalOnlyPlan
+21989,21989,2018,AK,HIOS,ODS Premier,https://www.modahealth.com/ProviderSearch/faces/webpages/home.xhtml?dn=ods,13,,
+cat: Unable to write to output stream.
+[hduser@Inceptez creditcard_insurance]$ 
+
+
+hive (insure)> select networkurl from insurance limit 2;
+OK
+networkurl
+https://www.modahealth.com/ProviderSearch/faces/webpages/home.xhtml?dn=ods
+https://www.premera.com/wa/visitor/
+Time taken: 1.212 seconds, Fetched: 2 row(s)
+
+
+Create a partitioned table and load manually or by modifying the below script which has to generate
+the load command and it has to load the data into the below insurance table automatically.
+----------------------------------------------------------------------------------------------------
+
+
+hive (insure)> create table insurance_1
+             > (
+             > issuerid1 int,
+             > issuerid2 int,
+             > businessyear int,
+             > statecode string,
+             > sourcename string,
+             > networkname string,
+             > networkurl string,
+             > rownumber int,
+             > marketcoverage string,
+             > dentalonlyplan string
+             > )
+             > partitioned by (datadt date, hr int)
+             > row format delimited fields terminated by ','
+             > tblproperties("skip.header.line.count"="1");
+OK
+Time taken: 0.212 seconds
+hive (insure)> 
+
+Load data
+---------
+
+hive (insure)> load data inpath '/user/hduser/insurance_clouddata/creditcard_insurance_2020102402' overwrite into table insurance_1 partition(datadt='2020-10-24',hr=02);
+Loading data to table insure.insurance_1 partition (datadt=2020-10-24, hr=2)
+Partition insure.insurance_1{datadt=2020-10-24, hr=2} stats: [numFiles=1, numRows=0, totalSize=414543, rawDataSize=0]
+OK
+Time taken: 1.386 seconds
+
+hive (insure)> select count(*) from insurance_1;
+
+result
+------
+OK
+_c0
+3822
+
+hive (insure)> select count(*) as NUM_OF_RECORDS from insurance;
+
+result
+------
+OK
+num_of_records
+3822
+
+
+hive (insure)> select count(*) from insurance where issuerid1 is null and issuerid2 is null;
+
+result
+------
+
+OK
+_c0
+459
+
+Delete the invalid data with null issuerid1 and issuerid2 using insert select query
+-----------------------------------------------------------------------------------
+
+hive (insure)> insert overwrite table insurance_1 partition(datadt,hr) select * from insurance_1 where issuerid1 is not null and issuerid2 is not null;
+
+hive (insure)> select count(*) from insurance_1;
+
+Result:
+-------
+3362
+
+
+/home/hduser/creditcard_insurance/hivepart.sh
+---------------------------------------------
+
+Execute:
+bash hivepart.sh /user/hduser/insurance_clouddata insure.insurance_1 creditcard_insurance
+
+echo output:
+file with path name is /user/hduser/insurance_clouddata/creditcard_insurance_2020102403
+creditcard_insurance_2020102403
+2020-10-24
+03
+loading hive table
+
+Drop the old partition
+----------------------
+
+hive (insure)> alter table insurance_1 drop partition(datadt='2020-10-24',hr=2);
+Dropped the partition datadt=2020-10-24/hr=2
+OK
+Time taken: 3.306 seconds
+hive (insure)> show partitions insurance_1;
+OK
+partition
+datadt=2020-10-24/hr=3
+Time taken: 0.204 seconds, Fetched: 1 row(s)
+
+hive (insure)> insert overwrite table insurance_1 partition(datadt,hr) select * from insurance_1 where issuerid1 is not null and issuerid2 is not null and datadt='2020-10-24' and hr=3;
+
+hive (insure)> select * from insurance_1 where issuerid1 is null and issuerid2 is null
+             > ;
+OK
+insurance_1.issuerid1	insurance_1.issuerid2	insurance_1.businessyear	insurance_1.statecode	insurance_1.sourcename	insurance_1.networkname	insurance_1.networkurl	insurance_1.rownumber	insurance_1.marketcoverage	insurance_1.dentalonlyplan	insurance_1.datadt	insurance_1.hr
+Time taken: 0.311 seconds
+
+Create a fixed width hive table to load the fixed width states_fixedwidth data using Regex Serde
+------------------------------------------------------------------------------------------------
+
+[hduser@Inceptez creditcard_insurance]$ cat states_fixedwidth
+ALAlabama             
+AKAlaska              
+AZArizona 
+
+hive (insure)> CREATE EXTERNAL TABLE insure.state_master (statecd STRING, statedesc STRING)
+             > ROW FORMAT SERDE 'org.apache.hadoop.hive.contrib.serde2.RegexSerDe'
+             > WITH SERDEPROPERTIES ("input.regex" = "(.{2})(.{20})")
+             > LOCATION '/user/hduser/states';
+OK
+Time taken: 0.357 seconds
+
+hive (insure)> load data local inpath '/home/hduser/creditcard_insurance/states_fixedwidth' overwrite into table
+             > insure.state_master;
+Loading data to table insure.state_master
+Table insure.state_master stats: [numFiles=1, numRows=0, totalSize=1173, rawDataSize=0]
+OK
+Time taken: 0.41 seconds
+
+hive (insure)> select * from state_master limit 5;
+OK
+state_master.statecd	state_master.statedesc
+AL	Alabama             
+AK	Alaska              
+AZ	Arizona             
+AR	Arkansas            
+CA	California          
+Time taken: 0.142 seconds, Fetched: 5 row(s)
+
+Create a managed table on top of the hive output defaulter’s dataset created above.
+-----------------------------------------------------------------------------------
+
+hive (insure)> CREATE EXTERNAL table defaulters (id int,IssuerId1 int,IssuerId2 int,lmt int,newlmt double,sex int,
+             > edu int,marital int,pay int,billamt int,newbillamt float,defaulter int)
+             > row format delimited fields terminated by ','
+             > stored as textfile
+             > LOCATION '/user/hduser/defaultersout';
+OK
+Time taken: 0.292 seconds
+
+
+Create a final managed table (later convert to external table) in orc with snappy compression and load
+the above 2 tables joined by applying different functions as given below .
+This table should not allow duplicates when it is empty or if not using overwrite option.
+------------------------------------------------------------------------------------------
+
+hive (insure)> CREATE TABLE insurancestg (IssuerId int,BusinessYear int,StateCode string,statedesc string,SourceName
+             > string,NetworkName string,NetworkURL string,RowNumber int,MarketCoverage string,DentalOnlyPlan
+             > string,id int,lmt int,newlmt int,reduced_lmt int,sex varchar(6),grade varchar(20),marital int,pay
+             > int,billamt int,newbillamt float,penality float,defaulter int)
+             > row format delimited fields terminated by ','
+             > LOCATION '/user/hduser/insurancestg';
+OK
+Time taken: 0.149 seconds
+
+hive (insure)> insert overwrite table insurancestg select concat(i.IssuerId1,i.IssuerId2) as
+             > issuerid,i.businessyear,i.statecode,s.statedesc as
+             > statedesc,i.sourcename,i.networkname,i.networkurl,i.rownumber,i.marketcoverage,i.dentalonlyplan,
+             > d.id,d.lmt,d.newlmt,d.newlmt-d.lmt as reduced_lmt,case when d.sex=1 then 'male' else 'female' end as
+             > sex ,case when d.edu=1 then 'lower grade' when d.edu=2 then 'lower middle grade' when d.edu=3 then
+             > 'middle grade' when d.edu=4 then 'higher grade' when d.edu=5 then 'doctrate grade' end as grade
+             > ,d.marital,d.pay,d.billamt,d.newbillamt,d.newbillamt-d.billamt as penality,d.defaulter
+             > from insurance i inner join defaulters d
+             > on (i.IssuerId1=d.IssuerId1 and i.IssuerId2=d.IssuerId2)
+             > inner join state_master s
+             > on (i.statecode=s.statecd);
+
+
+hive (insure)> select * from insurancestg limit 5;
+OK
+insurancestg.issuerid	insurancestg.businessyear	insurancestg.statecode	insurancestg.statedesc	insurancestg.sourcename	insurancestg.networkname	insurancestg.networkurl	insurancestg.rownumber	insurancestg.marketcoverage	insurancestg.dentalonlyplan	insurancestg.id	insurancestg.lmt	insurancestg.newlmt	insurancestg.reduced_lmtinsurancestg.sex	insurancestg.grade	insurancestg.marital	insurancestg.pay	insurancestg.billamt	insurancestg.newbillamt	insurancestg.penality	insurancestg.defaulter
+NULL	2018	AK	Alaska              	HIOS	HeritagePlus	https://www.premera.com/wa/visitor/	13	2120000	115200	-4800	female	lower middle grade	2	-1	2682	2735.64	53.639893	1
+NULL	2018	AK	Alaska              	HIOS	HeritagePlus	https://www.premera.com/wa/visitor/	13	2149	60000	57600	-2400	male	lower grade	1	2	60289	61494.78	1205.7812	1
+NULL	2018	AK	Alaska              	HIOS	HeritagePlus	https://www.premera.com/wa/visitor/	13	3365	140000	134400	-5600	male	lower middle grade	1	-1	6007	6127.14	120.14014	1
+NULL	2018	AK	Alaska              	HIOS	HeritagePlus	https://www.premera.com/wa/visitor/	13	9567	10000	9600	-400	male	middle grade	1	1	6969	7108.38	139.37988	1
+NULL	2018	AK	Alaska              	HIOS	DentalGuard Preferred	https://www.guardiananytime.com/fpapp/FPWeb/dentalSearch.process	13			6730	390000	374400	-15600	female	lower middle grade	1	278658	80231.16	1573.1562	1
+Time taken: 0.167 seconds, Fetched: 5 row(s)
+
+hive (insure)> select count(*) from insurancestg;
+
+OK
+_c0
+14417
+Time taken: 50.693 seconds, Fetched: 1 row(s)
+
+
+hive (insure)> CREATE TABLE insuranceorc (IssuerId int,BusinessYear int,StateCode string,statedesc string,SourceName
+             > string,NetworkName string,NetworkURL string,RowNumber int,MarketCoverage string,DentalOnlyPlan
+             > string,id int,lmt int,newlmt int,reduced_lmt int,sex varchar(6),grade varchar(20),marital int,pay
+             > int,billamt int,newbillamt float,penality int,defaulter int)
+             > row format delimited fields terminated by ','
+             > STORED as ORC
+             > LOCATION '/user/hduser/insuranceorc'
+             > TBLPROPERTIES ("immutable"="true","orc.compress"="SNAPPY");
+OK
+Time taken: 0.906 seconds
+
+hive (insure)> Insert into insuranceorc select * from insurancestg where issuerid is not null;
+
+
+hive (insure)> select * from insuranceorc limit 2;
+OK
+insuranceorc.issuerid	insuranceorc.businessyear	insuranceorc.statecode	insuranceorc.statedesc	insuranceorc.sourcename	insuranceorc.networkname	insuranceorc.networkurl	insuranceorc.rownumber	insuranceorc.marketcoverage	insuranceorc.dentalonlyplan	insuranceorc.id	insuranceorc.lmt	insuranceorc.newlmt	insuranceorc.reduced_lmtinsuranceorc.sex	insuranceorc.grade	insuranceorc.marital	insuranceorc.pay	insuranceorc.billamt	insuranceorc.newbillamt	insuranceorc.penality	insuranceorc.defaulter
+1253812538	2018	AL	Alabama             	HIOS	DenteMax	http://www2.dentemax.com/	13	7628	250000	240000	-10000	male	lower grade	1	-1	390	397.8	7	1
+1253812538	2018	AL	Alabama             	HIOS	DenteMax	http://www2.dentemax.com/	13	7629	140000	134400	-5600	female	lower middle grade	2	2	136308	139034.16	2726	1
+Time taken: 0.079 seconds, Fetched: 2 row(s)
+
+Second run:
+
+hive (insure)> Insert into insuranceorc select * from insurancestg where issuerid is not null;
+FAILED: SemanticException [Error 10256]: Inserting into a non-empty immutable table is not allowed insuranceorc
+
+hive (insure)> truncate table insuranceorc;
+OK
+Time taken: 0.097 seconds
+hive (insure)> select * from insuranceorc limit 2;
+OK
+insuranceorc.issuerid	insuranceorc.businessyear	insuranceorc.statecode	insuranceorc.statedesc	insuranceorc.sourcename	insuranceorc.networkname	insuranceorc.networkurl	insuranceorc.rownumber	insuranceorc.marketcoverage	insuranceorc.dentalonlyplan	insuranceorc.id	insuranceorc.lmt	insuranceorc.newlmt	insuranceorc.reduced_lmtinsuranceorc.sex	insuranceorc.grade	insuranceorc.marital	insuranceorc.pay	insuranceorc.billamt	insuranceorc.newbillamt	insuranceorc.penality	insuranceorc.defaulter
+Time taken: 0.122 seconds
+
+hive (insure)> Insert into insuranceorc select * from insurancestg where issuerid is not null;
+
+hive (insure)> select * from insuranceorc limit 2;
+OK
+insuranceorc.issuerid	insuranceorc.businessyear	insuranceorc.statecode	insuranceorc.statedesc	insuranceorc.sourcename	insuranceorc.networkname	insuranceorc.networkurl	insuranceorc.rownumber	insuranceorc.marketcoverage	insuranceorc.dentalonlyplan	insuranceorc.id	insuranceorc.lmt	insuranceorc.newlmt	insuranceorc.reduced_lmtinsuranceorc.sex	insuranceorc.grade	insuranceorc.marital	insuranceorc.pay	insuranceorc.billamt	insuranceorc.newbillamt	insuranceorc.penality	insuranceorc.defaulter
+1253812538	2018	AL	Alabama             	HIOS	DenteMax	http://www2.dentemax.com/	13	7628	250000	240000	-10000	male	lower grade	1	-1	390	397.8	7	1
+1253812538	2018	AL	Alabama             	HIOS	DenteMax	http://www2.dentemax.com/	13	7629	140000	134400	-5600	female	lower middle grade	2	2	136308	139034.16	2726	1
+Time taken: 0.06 seconds, Fetched: 2 row(s)
+
+Convert the above table from managed to external, usually we use the below statement if we can’t
+create external table in the initial stage itself for example sqoop import hive table can’t be created as
+external initially.
+---------------------------------------------------------------------------------------------------------
+
+hive (insure)> describe formatted insuranceorc;
+OK
+col_name	data_type	comment
+# col_name            	data_type           	comment             
+	 	 
+issuerid            	int                 	                    
+businessyear        	int                 	                    
+statecode           	string              	                    
+statedesc           	string              	                    
+sourcename          	string              	                    
+networkname         	string              	                    
+networkurl          	string              	                    
+rownumber           	int                 	                    
+marketcoverage      	string              	                    
+dentalonlyplan      	string              	                    
+id                  	int                 	                    
+lmt                 	int                 	                    
+newlmt              	int                 	                    
+reduced_lmt         	int                 	                    
+sex                 	varchar(6)          	                    
+grade               	varchar(20)         	                    
+marital             	int                 	                    
+pay                 	int                 	                    
+billamt             	int                 	                    
+newbillamt          	float               	                    
+penality            	int                 	                    
+defaulter           	int                 	                    
+	 	 
+# Detailed Table Information	 	 
+Database:           	insure              	 
+Owner:              	hduser              	 
+CreateTime:         	Sat Oct 24 05:42:00 IST 2020	 
+LastAccessTime:     	UNKNOWN             	 
+Protect Mode:       	None                	 
+Retention:          	0                   	 
+Location:           	hdfs://localhost:54310/user/hduser/insuranceorc	 
+Table Type:         	MANAGED_TABLE       	 
+Table Parameters:	 	 
+	COLUMN_STATS_ACCURATE	true                
+	immutable           	true                
+	numFiles            	0                   
+	orc.compress        	SNAPPY              
+	totalSize           	0                   
+	transient_lastDdlTime	1603498623          
+	 	 
+# Storage Information	 	 
+SerDe Library:      	org.apache.hadoop.hive.ql.io.orc.OrcSerde	 
+InputFormat:        	org.apache.hadoop.hive.ql.io.orc.OrcInputFormat	 
+OutputFormat:       	org.apache.hadoop.hive.ql.io.orc.OrcOutputFormat	 
+Compressed:         	No                  	 
+Num Buckets:        	-1                  	 
+Bucket Columns:     	[]                  	 
+Sort Columns:       	[]                  	 
+Storage Desc Params:	 	 
+	field.delim         	,                   
+	serialization.format	,                   
+Time taken: 0.118 seconds, Fetched: 53 row(s)
+hive (insure)> 
+
+
+hive (insure)> alter table insuranceorc SET TBLPROPERTIES('EXTERNAL'='TRUE');
+OK
+Time taken: 0.184 seconds
+
+hive (insure)> describe formatted insuranceorc;
+OK
+col_name	data_type	comment
+# col_name            	data_type           	comment             
+	 	 
+issuerid            	int                 	                    
+businessyear        	int                 	                    
+statecode           	string              	                    
+statedesc           	string              	                    
+sourcename          	string              	                    
+networkname         	string              	                    
+networkurl          	string              	                    
+rownumber           	int                 	                    
+marketcoverage      	string              	                    
+dentalonlyplan      	string              	                    
+id                  	int                 	                    
+lmt                 	int                 	                    
+newlmt              	int                 	                    
+reduced_lmt         	int                 	                    
+sex                 	varchar(6)          	                    
+grade               	varchar(20)         	                    
+marital             	int                 	                    
+pay                 	int                 	                    
+billamt             	int                 	                    
+newbillamt          	float               	                    
+penality            	int                 	                    
+defaulter           	int                 	                    
+	 	 
+# Detailed Table Information	 	 
+Database:           	insure              	 
+Owner:              	hduser              	 
+CreateTime:         	Sat Oct 24 05:42:00 IST 2020	 
+LastAccessTime:     	UNKNOWN             	 
+Protect Mode:       	None                	 
+Retention:          	0                   	 
+Location:           	hdfs://localhost:54310/user/hduser/insuranceorc	 
+Table Type:         	EXTERNAL_TABLE      	 
+Table Parameters:	 	 
+	COLUMN_STATS_ACCURATE	false               
+	EXTERNAL            	TRUE                
+	immutable           	true                
+	last_modified_by    	hduser              
+	last_modified_time  	1603498926          
+	numFiles            	0                   
+	numRows             	-1                  
+	orc.compress        	SNAPPY              
+	rawDataSize         	-1                  
+	totalSize           	0                   
+	transient_lastDdlTime	1603498926          
+	 	 
+# Storage Information	 	 
+SerDe Library:      	org.apache.hadoop.hive.ql.io.orc.OrcSerde	 
+InputFormat:        	org.apache.hadoop.hive.ql.io.orc.OrcInputFormat	 
+OutputFormat:       	org.apache.hadoop.hive.ql.io.orc.OrcOutputFormat	 
+Compressed:         	No                  	 
+Num Buckets:        	-1                  	 
+Bucket Columns:     	[]                  	 
+Sort Columns:       	[]                  	 
+Storage Desc Params:	 	 
+	field.delim         	,                   
+	serialization.format	,                   
+Time taken: 0.108 seconds, Fetched: 58 row(s)
+hive (insure)> 
+
+Common Table Expression
+-----------------------
+
+hive (insure)> with T1 as ( select max(penality) as penalitymale from insuranceorc where sex='male'),
+             > T2 as ( select max(penality) as penalityfemale from insuranceorc where sex='female')
+             > select penalitymale,penalityfemale
+             > from T1 inner join T2
+             > ON 1=1;
+
+
+Data Governance - Redaction and Masking using Hive and Python
+-------------------------------------------------------------
+create view in hive to restrict few columns, store queries, and apply some masking on sensitive
+columns using either query or by using the mask_insure.py function given in the project document.
+
+Using Translate
+----------------
+
+hive (insure)> create view middlegradeview as
+             > select issuerid,businessyear,statedesc,sourcename, sex,grade,marital,newbillamt,defaulter
+             > ,translate(translate(translate(translate(translate(networkurl,'a','x'),'b','y'),'c','z'),'s','r'),'.com','.aaa') as
+             > maskednetworkurl
+             > from insuranceorc
+             > where grade='middle grade'
+             > and issuerid is not null;
+OK
+issuerid	businessyear	statedesc	sourcename	sex	grade	marital	newbillamt	defaulter	maskednetworkurl
+Time taken: 0.536 seconds
+
+Using Python
+-------------
+
+hive (insure)> add file /home/hduser/creditcard_insurance/mask_insure.py
+
+
+hive (insure)> create view middlegradeview_1 as
+             > select transform(issuerid,businessyear,statedesc,sourcename, defaulter ,networkurl) 
+             > using 'python /home/hduser/creditcard_insurance/mask_insure.py'
+             > as (issuerid,businessyear,statedesc,sourcename, defaulter ,maskednetworkurl)
+             > from insuranceorc
+             > where grade='middle grade'
+             > and issuerid is not null;
+OK
+issuerid	businessyear	statedesc	sourcename	defaulter	maskednetworkurl
+Time taken: 0.4 seconds
+
+
+hive (insure)> select * from middlegradeview_1 limit 5;
+
+
+OK
+middlegradeview_1.issuerid	middlegradeview_1.businessyear	middlegradeview_1.statedesc	middlegradeview_1.sourcename	middlegradeview_1.defaulter	middlegradeview_1.maskednetworkurl
+1710017100	2018	b8639464dd1fba2a366eed9409062ebeaaa48fe3b2630e3ab0f28230ae6426b0	db9a89f9b51c5542e501a5acadc9933f	1	https:--metlocator.metlife.aaa-metlocator-execute-Search?searchType=findDentistHCR_AZ&planType=DPPO&networkID=2
+1710017100	2018	b8639464dd1fba2a366eed9409062ebeaaa48fe3b2630e3ab0f28230ae6426b0	db9a89f9b51c5542e501a5acadc9933f	1	https:--metlocator.metlife.aaa-metlocator-execute-Search?searchType=findDentistHCR_AZ&planType=DPPO&networkID=2
+1710017100	2018	b8639464dd1fba2a366eed9409062ebeaaa48fe3b2630e3ab0f28230ae6426b0	db9a89f9b51c5542e501a5acadc9933f	1	https:--metlocator.metlife.aaa-metlocator-execute-Search?searchType=findDentistHCR_AZ&planType=DPPO&networkID=2
+1710017100	2018	b8639464dd1fba2a366eed9409062ebeaaa48fe3b2630e3ab0f28230ae6426b0	db9a89f9b51c5542e501a5acadc9933f	1	https:--metlocator.metlife.aaa-metlocator-execute-Search?searchType=findDentistHCR_AZ&planType=DPPO&networkID=2
+1710017100	2018	b8639464dd1fba2a366eed9409062ebeaaa48fe3b2630e3ab0f28230ae6426b0	db9a89f9b51c5542e501a5acadc9933f	1	https:--metlocator.metlife.aaa-metlocator-execute-Search?searchType=findDentistHCR_AZ&planType=DPPO&networkID=2
+Time taken: 41.259 seconds, Fetched: 5 row(s)
+
+
+
+ 
